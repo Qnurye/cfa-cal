@@ -1,31 +1,64 @@
 import { Env } from './types';
 import { AuthService, CalendarService } from './services';
 import { createEvents } from 'ics';
-import { CINEMAS } from './config';
+import { CFA } from './config';
 
 const parseLocation = (location: string): {
   city_code: string,
-  area_code: string,
-  theatre_code: string,
+  cinema_code: string,
+  hall_code: string,
   location: string,
   geo: { lat: number, lon: number }
 } => {
-  for (const cinema of CINEMAS) {
-    for (const area of cinema.areas) {
-      for (const theatre of area.theatres) {
-        if (theatre.keywords.every((k) => location.includes(k))) {
+  for (const city of CFA) {
+    for (const cinema of city.cinemas) {
+      for (const hall of cinema.halls) {
+        if (hall.keywords.every((k) => location.includes(k))) {
           return {
-            city_code: cinema.city_code,
-            area_code: area.area_code,
-            theatre_code: theatre.theatre_code,
-            location: cinema.city + area.location + theatre.name,
-            geo: { lat: area.lat, lon: area.lng }
+            city_code: city.city_code,
+            cinema_code: cinema.cinema_code,
+            hall_code: hall.hall_code,
+            location: city.name + cinema.location + hall.name,
+            geo: { lat: cinema.lat, lon: cinema.lng }
           };
         }
       }
     }
   }
-  return { city_code: '', area_code: '', theatre_code: '', location, geo: { lat: 0, lon: 0 } };
+  return { city_code: '', cinema_code: '', hall_code: '', location, geo: { lat: 0, lon: 0 } };
+};
+
+const codeToCity = (code: string): string => {
+  for (const city of CFA) {
+    if (city.city_code === code) {
+      return city.name;
+    }
+  }
+  return '';
+};
+
+const codeToCinema = (code: string): string => {
+  for (const city of CFA) {
+    for (const cinema of city.cinemas) {
+      if (cinema.cinema_code === code) {
+        return cinema.name;
+      }
+    }
+  }
+  return '';
+};
+
+const codeToHall = (code: string): string => {
+  for (const city of CFA) {
+    for (const cinema of city.cinemas) {
+      for (const hall of cinema.halls) {
+        if (hall.hall_code === code) {
+          return hall.name;
+        }
+      }
+    }
+  }
+  return '';
 };
 
 /**
@@ -33,16 +66,19 @@ const parseLocation = (location: string): {
  */
 export async function handleCalendarICSRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
-  let city_code = '', area_code = '', theatre_code = '';
+  let city_code = '', cinema_code = '', hall_code = '', title = 'CFA Calendar';
   const paramsCount = url.pathname.split('/').length;
   if (paramsCount === 3) {
     [, city_code] = url.pathname.split('/');
+    title = codeToCity(city_code);
   }
   else if (paramsCount === 4) {
-    [, city_code, area_code] = url.pathname.split('/');
+    [, city_code, cinema_code] = url.pathname.split('/');
+    title = codeToCity(city_code) + ' ' + codeToCinema(cinema_code);
   }
   else if (paramsCount === 5) {
-    [, city_code, area_code, theatre_code] = url.pathname.split('/');
+    [, city_code, cinema_code, hall_code] = url.pathname.split('/');
+    title = codeToCity(city_code) + ' ' + codeToCinema(cinema_code) + ' ' + codeToHall(hall_code);
   }
 
   const authService = new AuthService(env);
@@ -56,10 +92,10 @@ export async function handleCalendarICSRequest(request: Request, env: Env, ctx: 
     .filter((event) => {
       const {
         city_code: event_city_code,
-        area_code: event_area_code,
-        theatre_code: event_theatre_code
+        cinema_code: event_area_code,
+        hall_code: event_theatre_code
       } = parseLocation(event.screen_cinema);
-      return (city_code === event_city_code || city_code === '') && (area_code === event_area_code || area_code === '') && (theatre_code === event_theatre_code || theatre_code === '');
+      return (city_code === event_city_code || city_code === '') && (cinema_code === event_area_code || cinema_code === '') && (hall_code === event_theatre_code || hall_code === '');
     })
     .map((event) => {
       let startArr: number[] | null = null;
@@ -88,7 +124,7 @@ export async function handleCalendarICSRequest(request: Request, env: Env, ctx: 
         status: 'TENTATIVE',
         uid: String(event.id) + '@cfa-cal',
         productId: 'cfa-cal/ics',
-        calName: 'cfa-cal',
+        calName: title,
         organizer: { name: 'cfa-cal', email: 'contact@qnury.es' }
       };
     })

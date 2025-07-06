@@ -116,23 +116,23 @@ export interface CalendarEventData {
   cover_img1: string;
 }
 
-export interface Cinema {
-  city: string;
+export interface City {
+  name: string;
   city_code: string;
-  areas: Area[];
+  cinemas: Cinema[];
 }
 
-export interface Area {
+export interface Cinema {
   name: string;
-  area_code: string;
+  cinema_code: string;
   location: string;
   lat: number;
   lng: number;
-  theatres: Theatre[];
+  halls: Hall[];
 }
 
-export interface Theatre {
+export interface Hall {
   name: string;
-  theatre_code: string;
+  hall_code: string;
   keywords: string[];
 }
