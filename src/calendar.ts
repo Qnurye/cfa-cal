@@ -65,6 +65,7 @@ export async function handleCalendarICSRequest(request: Request, env: Env, ctx: 
       let startArr: number[] | null = null;
       if (event.screen_start_time) {
         const d = new Date(event.screen_start_time);
+        d.setHours(d.getHours() - 8);
         if (!isNaN(d.getTime())) {
           startArr = [d.getFullYear(), d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes()];
         }
@@ -76,6 +77,7 @@ export async function handleCalendarICSRequest(request: Request, env: Env, ctx: 
       if (!startArr) return null;
       return {
         start: startArr,
+        startInputType: 'utc',
         duration,
         title: event.show_name,
         description: event.film_type + (event.film_area ? ' / ' + event.film_area : '') + (event.activity ? ('\n' + event.activity) : ''),
