@@ -4,10 +4,15 @@
 	"private": true,
 	"scripts": {
 		"deploy": "wrangler deploy",
-		"dev": "wrangler dev",
+		"dev": "wrangler dev --test-scheduled",
 		"start": "wrangler dev",
 		"test": "vitest",
-		"cf-typegen": "wrangler types"
+		"cf-typegen": "wrangler types",
+		"db:create": "wrangler d1 create cfa_cal_db",
+		"db:execute": "wrangler d1 execute cfa_cal_db --file=./schema.sql",
+		"db:execute:local": "wrangler d1 execute cfa_cal_db --local --file=./schema.sql",
+		"kv:create": "wrangler kv:namespace create CFA_CAL_KV",
+		"setup": "pnpm db:execute && pnpm cf-typegen"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.8.19",

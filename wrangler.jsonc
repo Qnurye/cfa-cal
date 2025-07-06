@@ -9,7 +9,7 @@
 	"compatibility_date": "2025-07-05",
 	"observability": {
 		"enabled": true
-	}
+	},
 	/**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
@@ -22,12 +22,28 @@
 	 * databases, object storage, AI inference, real-time communication and more.
 	 * https://developers.cloudflare.com/workers/runtime-apis/bindings/
 	 */
+	"kv_namespaces": [
+		{
+			"binding": "CFA_CAL_KV",
+			"id": "453912f1ea2a432bbec2d04d11b5a1ab"
+		}
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "cfa_cal_db",
+			"database_id": "8c9fa3b1-f5d6-4bf1-aae6-45749d05428e"
+		}
+	],
 
 	/**
 	 * Environment Variables
 	 * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
 	 */
-	// "vars": { "MY_VARIABLE": "production_value" },
+	"vars": {
+		"API_ACCOUNT": "YOUR_ACCOUNT_HERE",
+		"API_PASSWORD": "YOUR_PASSWORD_HERE"
+	},
 	/**
 	 * Note: Use secrets to store sensitive data.
 	 * https://developers.cloudflare.com/workers/configuration/secrets/
@@ -43,5 +59,13 @@
 	 * Service Bindings (communicate between multiple Workers)
 	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
 	 */
-	// "services": [{ "binding": "MY_SERVICE", "service": "my-service" }]
+	// "services": [{ "binding": "MY_SERVICE", "service": "my-service" }],
+
+	/**
+	 * Scheduled Tasks (Cron Triggers)
+	 * https://developers.cloudflare.com/workers/runtime-apis/scheduled-events/
+	 */
+	"triggers": {
+		"crons": ["0 0,12 1 * *"]
+	}
 }
