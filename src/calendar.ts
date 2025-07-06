@@ -29,19 +29,19 @@ const parseLocation = (location: string): {
 };
 
 /**
- * Handle requests to the /api/{city}/{area}/{theatre}/calendar.ics endpoint
+ * Handle requests to the /{city}/{area}/{theatre}/calendar.ics endpoint
  */
 export async function handleCalendarICSRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   let city_code = '', area_code = '', theatre_code = '';
   const paramsCount = url.pathname.split('/').length;
-  if (paramsCount === 4) {
+  if (paramsCount === 3) {
     [, , city_code] = url.pathname.split('/');
   }
-  else if (paramsCount === 5) {
+  else if (paramsCount === 4) {
     [, , city_code, area_code] = url.pathname.split('/');
   }
-  else if (paramsCount === 6) {
+  else if (paramsCount === 5) {
     [, , city_code, area_code, theatre_code] = url.pathname.split('/');
   }
 
