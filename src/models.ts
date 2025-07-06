@@ -115,3 +115,24 @@ export interface CalendarEventData {
   tags: string[];
   cover_img1: string;
 }
+
+export interface Cinema {
+  city: string;
+  city_code: string;
+  areas: Area[];
+}
+
+export interface Area {
+  name: string;
+  area_code: string;
+  location: string;
+  lat: number;
+  lng: number;
+  theatres: Theatre[];
+}
+
+export interface Theatre {
+  name: string;
+  theatre_code: string;
+  keywords: string[];
+}

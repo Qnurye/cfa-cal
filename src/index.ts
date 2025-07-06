@@ -3,6 +3,7 @@
 
 import { AuthService, CalendarService } from './services';
 import { Env } from './types';
+import { handleCalendarICSRequest } from './calendar';
 
 /**
  * Main worker handler
@@ -18,8 +19,12 @@ export default {
     // API endpoints
     if (path === '/api/calendar') {
       return await handleCalendarRequest(request, env, ctx);
-    } else if (path === '/api/calendar/refresh') {
+    }
+    else if (path === '/api/calendar/refresh') {
       return await handleCalendarRefreshRequest(request, env, ctx);
+    }
+    else if (path.endsWith('/calendar.ics')) {
+      return await handleCalendarICSRequest(request, env, ctx);
     }
 
     // Default response
@@ -55,10 +60,12 @@ export default {
           // Update the last fetch time
           await calendarService.updateLastFetchTime();
           console.log(`Successfully updated calendar data for ${year}-${month}`);
-        } else {
+        }
+        else {
           console.error(`Failed to store calendar data for ${year}-${month}`);
         }
-      } else {
+      }
+      else {
         console.error(`Failed to fetch calendar data for ${year}-${month}`);
       }
     } catch (error) {
@@ -95,7 +102,8 @@ async function handleCalendarRequest(request: Request, env: Env, ctx: ExecutionC
         if (success) {
           // Update the last fetch time
           await calendarService.updateLastFetchTime();
-        } else {
+        }
+        else {
           console.error('Failed to store calendar data');
         }
       }
@@ -170,3 +178,4 @@ async function handleCalendarRefreshRequest(request: Request, env: Env, ctx: Exe
     );
   }
 }
+

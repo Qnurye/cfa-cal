@@ -13,15 +13,15 @@ export async function login(account: string, password: string): Promise<LoginRes
   const response = await fetch('https://api.guoyingjiaying.cn/api/login', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/json'
     },
     body: JSON.stringify({
       account,
-      password,
-    }),
+      password
+    })
   });
 
-	return await response.json();
+  return await response.json();
 }
 
 /**
@@ -42,16 +42,16 @@ export async function fetchCalendar(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
+      'Authorization': `Bearer ${token}`
     },
     body: JSON.stringify({
       year,
       month,
-      cinema_code,
-    }),
+      cinema_code
+    })
   });
 
-	return await response.json();
+  return await response.json();
 }
 
 /**

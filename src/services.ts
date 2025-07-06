@@ -1,14 +1,15 @@
 // services.ts
 // Business logic for calendar data management
 
-import { login, fetchCalendar, isLoginSuccessful, isCalendarResponseValid } from './api-client';
-import { KVStorage, CalendarResponse, CalendarEventData, CalendarDayData } from './models';
+import { fetchCalendar, isCalendarResponseValid, isLoginSuccessful, login } from './api-client';
+import { CalendarDay, CalendarEvent, CalendarResponse, KVStorage } from './models';
 
 /**
  * Auth service functions
  */
 export class AuthService {
-  constructor(private env: Env) {}
+  constructor(private env: Env) {
+  }
 
   /**
    * Get the stored access token, or return null if not present or expired
@@ -51,11 +52,12 @@ export class AuthService {
         // Store token and expiry time in KV
         await this.updateKVData({
           access_token: token,
-          token_expires_at: expires_time * 1000, // Convert to milliseconds
+          token_expires_at: expires_time * 1000 // Convert to milliseconds
         });
 
         return token;
-      } else {
+      }
+      else {
         console.error('Login failed:', loginResponse.msg);
         return null;
       }
@@ -96,7 +98,8 @@ export class AuthService {
  * Calendar service for handling calendar data
  */
 export class CalendarService {
-  constructor(private env: Env, private authService: AuthService) {}
+  constructor(private env: Env, private authService: AuthService) {
+  }
 
   /**
    * Fetch calendar data for a specific month
@@ -118,7 +121,8 @@ export class CalendarService {
 
       if (isCalendarResponseValid(calendarData)) {
         return calendarData;
-      } else {
+      }
+      else {
         // Check if token might be expired despite our local expiry check
         if (calendarData.status === 401 || calendarData.status === 403) {
           // Try re-authenticating once
@@ -168,13 +172,13 @@ export class CalendarService {
 
           // Insert or update calendar day
           await session.prepare(`
-            INSERT INTO calendar_days (day, month, year, date, have_activity, events_count, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (date)
-            DO UPDATE SET
-              have_activity = excluded.have_activity,
-              events_count = excluded.events_count,
-              updated_at = excluded.updated_at
+              INSERT INTO calendar_days (day, month, year, date, have_activity, events_count, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (date)
+            DO
+              UPDATE SET
+                  have_activity = excluded.have_activity,
+                  events_count = excluded.events_count,
+                  updated_at = excluded.updated_at
           `).bind(
             day.day,
             month,
@@ -187,7 +191,9 @@ export class CalendarService {
           ).run();
 
           if (day.screen && day.screen.length > 0) {
-            await session.prepare(`DELETE FROM calendar_events WHERE date = ?`).bind(date).run();
+            await session.prepare(`DELETE
+                                   FROM calendar_events
+                                   WHERE date = ?`).bind(date).run();
             for (const event of day.screen) {
               let eventDay = day.day;
               let eventMonth = month;
@@ -200,25 +206,22 @@ export class CalendarService {
                   eventMonth = startTime.getMonth() + 1;
                   eventYear = startTime.getFullYear();
                   eventDate = `${eventYear}-${eventMonth.toString().padStart(2, '0')}-${eventDay.toString().padStart(2, '0')}`;
-                } catch (e) {}
+                } catch (e) {
+                }
               }
               await session.prepare(`
-                INSERT INTO calendar_events (
-                  id, show_name, film_area, film_type, film_year, screen_time_len,
-                  show_mode, show_type, program_ids, activity_ids, statu_verify,
-                  show_time, show_price, screen_up_time, screen_sales_time,
-                  screen_start_time, program_colle, screen_cinema, activity,
-                  have_activity, tags, cover_img1, date, day, month, year,
-                  created_at, updated_at
-                )
-                VALUES (
-                  ?, ?, ?, ?, ?, ?,
-                  ?, ?, ?, ?, ?,
-                  ?, ?, ?, ?,
-                  ?, ?, ?, ?,
-                  ?, ?, ?, ?, ?, ?, ?,
-                  ?, ?
-                )
+                  INSERT INTO calendar_events (id, show_name, film_area, film_type, film_year, screen_time_len,
+                                               show_mode, show_type, program_ids, activity_ids, statu_verify,
+                                               show_time, show_price, screen_up_time, screen_sales_time,
+                                               screen_start_time, program_colle, screen_cinema, activity,
+                                               have_activity, tags, cover_img1, date, day, month, year,
+                                               created_at, updated_at)
+                  VALUES (?, ?, ?, ?, ?, ?,
+                          ?, ?, ?, ?, ?,
+                          ?, ?, ?, ?,
+                          ?, ?, ?, ?,
+                          ?, ?, ?, ?, ?, ?, ?,
+                          ?, ?)
               `).bind(
                 event.id,
                 event.show_name,
@@ -253,10 +256,8 @@ export class CalendarService {
           }
         }
         await session.prepare(`
-          INSERT INTO fetch_logs (
-            status, year, month, message, events_count, created_at
-          )
-          VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO fetch_logs (status, year, month, message, events_count, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
         `).bind(
           'success',
           year,
@@ -269,10 +270,8 @@ export class CalendarService {
       } catch (error) {
         console.error('Database error during calendar storage:', error);
         await session.prepare(`
-          INSERT INTO fetch_logs (
-            status, year, month, message, created_at
-          )
-          VALUES (?, ?, ?, ?, ?)
+            INSERT INTO fetch_logs (status, year, month, message, created_at)
+            VALUES (?, ?, ?, ?, ?)
         `).bind(
           'error',
           year,
@@ -291,7 +290,7 @@ export class CalendarService {
   /**
    * Get the current month's calendar data from D1
    */
-  async getCurrentMonthCalendar() {
+  async getCurrentMonthCalendar(): Promise<{ days: CalendarDay[]; events: CalendarEvent[] }> {
     try {
       const now = new Date();
       const year = now.getFullYear();
@@ -299,9 +298,10 @@ export class CalendarService {
 
       // Query for the current month's days and events
       const days = await this.env.DB.prepare(`
-        SELECT * FROM calendar_days
-        WHERE year = ? AND month = ?
-        ORDER BY day ASC
+          SELECT *
+          FROM calendar_days
+          WHERE year = ? AND month = ?
+          ORDER BY day ASC
       `).bind(year, month).all();
 
       if (!days.results || days.results.length === 0) {
@@ -309,14 +309,15 @@ export class CalendarService {
       }
 
       const events = await this.env.DB.prepare(`
-        SELECT * FROM calendar_events
-        WHERE year = ? AND month = ?
-        ORDER BY screen_start_time ASC
+          SELECT *
+          FROM calendar_events
+          WHERE year = ? AND month = ?
+          ORDER BY screen_start_time ASC
       `).bind(year, month).all();
 
       return {
-        days: days.results,
-        events: events.results || []
+        days: (days.results as unknown as CalendarDay[]),
+        events: (events.results as unknown as CalendarEvent[]) || []
       };
     } catch (error) {
       console.error('Error retrieving calendar data from database:', error);
@@ -344,8 +345,9 @@ export class CalendarService {
       const month = currentDate.getMonth() + 1; // 1-12
 
       const result = await this.env.DB.prepare(`
-        SELECT COUNT(*) as count FROM calendar_days
-        WHERE year = ? AND month = ?
+          SELECT COUNT(*) as count
+          FROM calendar_days
+          WHERE year = ? AND month = ?
       `).bind(year, month).first();
 
       // If we have no data for the current month, we should update
