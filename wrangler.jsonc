@@ -39,10 +39,7 @@
    * Environment Variables
    * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
    */
-  "vars": {
-    "API_ACCOUNT": "YOUR_ACCOUNT_HERE",
-    "API_PASSWORD": "YOUR_PASSWORD_HERE"
-  },
+
   /**
    * Note: Use secrets to store sensitive data.
    * https://developers.cloudflare.com/workers/configuration/secrets/
