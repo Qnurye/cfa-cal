@@ -36,13 +36,13 @@ export async function handleCalendarICSRequest(request: Request, env: Env, ctx: 
   let city_code = '', area_code = '', theatre_code = '';
   const paramsCount = url.pathname.split('/').length;
   if (paramsCount === 3) {
-    [, , city_code] = url.pathname.split('/');
+    [, city_code] = url.pathname.split('/');
   }
   else if (paramsCount === 4) {
-    [, , city_code, area_code] = url.pathname.split('/');
+    [, city_code, area_code] = url.pathname.split('/');
   }
   else if (paramsCount === 5) {
-    [, , city_code, area_code, theatre_code] = url.pathname.split('/');
+    [, city_code, area_code, theatre_code] = url.pathname.split('/');
   }
 
   const authService = new AuthService(env);
