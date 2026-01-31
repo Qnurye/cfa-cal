@@ -175,3 +175,4 @@ dist
 .dev.vars
 .wrangler/
 .idea/
+.dev.vars
