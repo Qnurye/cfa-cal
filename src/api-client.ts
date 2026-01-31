@@ -1,81 +1,111 @@
-// api-client.ts
 // API client for interacting with the remote calendar service
+// Following Cloudflare best practices:
+// - Proper error handling with typed errors
+// - Request timeouts
+// - Structured logging
 
-import { CalendarResponse, LoginResponse } from './models';
+import type { CalendarResponse, LoginResponse } from './models';
+import { ApiError, AuthError } from './utils/errors';
+
+const API_BASE = 'https://api.guoyingjiaying.cn';
+const REQUEST_TIMEOUT = 10000; // 10 seconds
+
+/**
+ * Make a fetch request with timeout
+ */
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeout = REQUEST_TIMEOUT
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 /**
  * Login to the API service
- * @param account - The account username
- * @param password - The account password
- * @returns The login response with token if successful
+ * @throws {AuthError} When login fails
+ * @throws {ApiError} When API request fails
  */
 export async function login(account: string, password: string): Promise<LoginResponse> {
-  const response = await fetch('https://api.guoyingjiaying.cn/api/login', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      account,
-      password
-    })
-  });
+  try {
+    const response = await fetchWithTimeout(`${API_BASE}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account, password }),
+    });
 
-  return await response.json();
+    if (!response.ok) {
+      throw new ApiError(`Login request failed with status ${response.status}`, response.status);
+    }
+
+    const data = await response.json<LoginResponse>();
+    return data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new ApiError('Login request timed out');
+    }
+    throw new ApiError(`Login failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 /**
  * Fetch calendar data for a specific month
- * @param token - The access token from login
- * @param year - The year to fetch (e.g. "2025")
- * @param month - The month to fetch (e.g. "07", zero-padded)
- * @param cinema_code - Optional cinema code filter
- * @returns Calendar response with events data
+ * @throws {ApiError} When API request fails
  */
 export async function fetchCalendar(
   token: string,
   year: string,
   month: string,
-  cinema_code: string = ''
+  cinema_code = ''
 ): Promise<CalendarResponse> {
-  const response = await fetch('https://api.guoyingjiaying.cn/api/v3/movie/getCalendar', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    },
-    body: JSON.stringify({
-      year,
-      month,
-      cinema_code
-    })
-  });
+  try {
+    const response = await fetchWithTimeout(`${API_BASE}/api/v3/movie/getCalendar`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ year, month, cinema_code }),
+    });
 
-  return await response.json();
+    const data = await response.json<CalendarResponse>();
+
+    // Pass through status for retry logic
+    if (!response.ok) {
+      return { ...data, status: response.status };
+    }
+
+    return data;
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new ApiError('Calendar request timed out');
+    }
+    throw new ApiError(`Failed to fetch calendar: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 /**
  * Check if a login response indicates valid credentials
- * @param loginResponse - The login response from API
- * @returns true if login was successful
  */
-export function isLoginSuccessful(loginResponse: LoginResponse): boolean {
-  return (
-    loginResponse.status === 200 &&
-    loginResponse.code === '410001' &&
-    loginResponse.data !== undefined
-  );
+export function isLoginSuccessful(response: LoginResponse): boolean {
+  return response.status === 200 && response.code === '410001' && response.data !== undefined;
 }
 
 /**
  * Check if a calendar API response is valid
- * @param calendarResponse - The calendar response from API
- * @returns true if the response contains valid calendar data
  */
-export function isCalendarResponseValid(calendarResponse: CalendarResponse): boolean {
-  return (
-    calendarResponse.status === 200 &&
-    calendarResponse.data !== undefined &&
-    Array.isArray(calendarResponse.data.list)
-  );
+export function isCalendarResponseValid(response: CalendarResponse): boolean {
+  return response.status === 200 && response.data !== undefined && Array.isArray(response.data.list);
 }
