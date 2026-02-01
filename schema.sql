@@ -55,6 +55,16 @@ CREATE TABLE IF NOT EXISTS calendar_events
     cover_img1
     TEXT,    -- poster/cover image URL
 
+    -- TMDb integration fields
+    tmdb_id
+    INTEGER, -- TMDb movie ID
+    imdb_id
+    TEXT,    -- IMDb ID (e.g., tt1234567)
+    tmdb_lookup_status
+    TEXT
+    DEFAULT
+    'pending', -- 'pending' | 'found' | 'not_found' | 'error'
+
     -- Additional fields for our database
     date
     TEXT

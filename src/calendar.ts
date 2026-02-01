@@ -7,6 +7,7 @@
 import { createEvents, type EventAttributes, type DurationObject } from 'ics';
 import { CFA } from './config';
 import type { CalendarEvent } from './models';
+import { generateMovieLinks, formatMovieLinksForDescription } from './utils/movie-links';
 
 /** Parsed location info from event */
 interface ParsedLocation {
@@ -107,10 +108,15 @@ function toIcsEvent(event: CalendarEvent, calendarTitle: string): EventAttribute
 
   const location = parseLocation(event.screen_cinema);
 
+  // Generate movie platform links
+  const movieLinks = generateMovieLinks(event.show_name, event.film_year, event.imdb_id);
+
   const description = [
     event.film_type,
     event.film_area ? `/ ${event.film_area}` : '',
     event.activity ? `\n${event.activity}` : '',
+    '\n---',
+    formatMovieLinksForDescription(movieLinks),
   ]
     .filter(Boolean)
     .join(' ');
@@ -133,7 +139,7 @@ function toIcsEvent(event: CalendarEvent, calendarTitle: string): EventAttribute
     description,
     location: location.displayLocation,
     geo: location.geo,
-    url: `https://search.douban.com/movie/subject_search?search_text=${encodeURIComponent(event.show_name)}`,
+    url: movieLinks.imdb,
     status: 'TENTATIVE',
     uid: `${event.id}@cfa-cal`,
     productId: 'cfa-cal/ics',
