@@ -3,8 +3,45 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createTestEnv } from '../setup/mocks';
 import { loginResponses, calendarResponses } from '../setup/fixtures';
-import { AuthService, CalendarService } from '../../src/services';
+import { AuthService, CalendarService, getThreeMonthRange } from '../../src/services';
 import { AuthError } from '../../src/utils/errors';
+
+describe('getThreeMonthRange()', () => {
+  it('should return correct range for a mid-year month', () => {
+    const date = new Date('2026-06-15');
+    const range = getThreeMonthRange(date);
+
+    expect(range.previous).toEqual({ year: 2026, month: 5 });
+    expect(range.current).toEqual({ year: 2026, month: 6 });
+    expect(range.next).toEqual({ year: 2026, month: 7 });
+  });
+
+  it('should handle January (previous month is December of previous year)', () => {
+    const date = new Date('2026-01-15');
+    const range = getThreeMonthRange(date);
+
+    expect(range.previous).toEqual({ year: 2025, month: 12 });
+    expect(range.current).toEqual({ year: 2026, month: 1 });
+    expect(range.next).toEqual({ year: 2026, month: 2 });
+  });
+
+  it('should handle December (next month is January of next year)', () => {
+    const date = new Date('2026-12-15');
+    const range = getThreeMonthRange(date);
+
+    expect(range.previous).toEqual({ year: 2026, month: 11 });
+    expect(range.current).toEqual({ year: 2026, month: 12 });
+    expect(range.next).toEqual({ year: 2027, month: 1 });
+  });
+
+  it('should use current date when no argument provided', () => {
+    const now = new Date();
+    const range = getThreeMonthRange();
+
+    expect(range.current.year).toBe(now.getFullYear());
+    expect(range.current.month).toBe(now.getMonth() + 1);
+  });
+});
 
 describe('AuthService', () => {
   let testEnv: ReturnType<typeof createTestEnv>;
@@ -266,6 +303,146 @@ describe('CalendarService', () => {
 
       consoleError.mockRestore();
     });
+
+    it('should accept targetYear and targetMonth parameters', async () => {
+      const service = new CalendarService(testEnv.env, authService);
+      const result = await service.storeCalendarData(calendarResponses.valid, 2025, 12);
+
+      expect(result).toBe(true);
+
+      // Verify queries include the specified year/month
+      const queries = testEnv.mockD1.getExecutedQueries();
+      const fetchLogQuery = queries.find(q => q.sql.includes('fetch_logs'));
+      expect(fetchLogQuery).toBeDefined();
+      expect(fetchLogQuery?.bindings).toContain(2025);
+      expect(fetchLogQuery?.bindings).toContain(12);
+    });
+  });
+
+  describe('fetchMultipleMonths()', () => {
+    it('should fetch multiple months in parallel', async () => {
+      testEnv.mockFetch.setResponse(/getCalendar/, new Response(JSON.stringify(calendarResponses.valid)));
+
+      const service = new CalendarService(testEnv.env, authService);
+      const result = await service.fetchMultipleMonths([
+        { year: 2026, month: 1 },
+        { year: 2026, month: 2 },
+      ]);
+
+      expect(result.results).toHaveLength(2);
+      expect(result.successCount).toBe(2);
+      expect(result.failureCount).toBe(0);
+    });
+
+    it('should handle partial failures gracefully', async () => {
+      // First call succeeds, second fails
+      testEnv.mockFetch.setResponse(/getCalendar/, [
+        new Response(JSON.stringify(calendarResponses.valid)),
+        new Response(JSON.stringify(calendarResponses.invalidData)),
+      ]);
+
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const service = new CalendarService(testEnv.env, authService);
+      const result = await service.fetchMultipleMonths([
+        { year: 2026, month: 1 },
+        { year: 2026, month: 2 },
+      ]);
+
+      expect(result.results).toHaveLength(2);
+      expect(result.successCount).toBe(1);
+      expect(result.failureCount).toBe(1);
+
+      consoleError.mockRestore();
+    });
+  });
+
+  describe('refreshThreeMonthsCalendar()', () => {
+    it('should refresh three months of data', async () => {
+      testEnv.mockFetch.setResponse(/getCalendar/, new Response(JSON.stringify(calendarResponses.valid)));
+
+      const service = new CalendarService(testEnv.env, authService);
+      const result = await service.refreshThreeMonthsCalendar();
+
+      expect(result.success).toBe(true);
+      expect(result.monthsRefreshed).toBe(3);
+      expect(result.monthsFailed).toBe(0);
+    });
+
+    it('should succeed even if some months fail', async () => {
+      // Two succeed, one fails
+      testEnv.mockFetch.setResponse(/getCalendar/, [
+        new Response(JSON.stringify(calendarResponses.valid)),
+        new Response(JSON.stringify(calendarResponses.invalidData)),
+        new Response(JSON.stringify(calendarResponses.valid)),
+      ]);
+
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const service = new CalendarService(testEnv.env, authService);
+      const result = await service.refreshThreeMonthsCalendar();
+
+      expect(result.success).toBe(true);
+      expect(result.monthsRefreshed).toBe(2);
+      expect(result.monthsFailed).toBe(1);
+
+      consoleError.mockRestore();
+    });
+
+    it('should return failure if all months fail', async () => {
+      testEnv.mockFetch.setResponse(/getCalendar/, new Response(JSON.stringify(calendarResponses.invalidData)));
+
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const service = new CalendarService(testEnv.env, authService);
+      const result = await service.refreshThreeMonthsCalendar();
+
+      expect(result.success).toBe(false);
+      expect(result.monthsRefreshed).toBe(0);
+      expect(result.monthsFailed).toBe(3);
+
+      consoleError.mockRestore();
+    });
+  });
+
+  describe('getThreeMonthsCalendar()', () => {
+    it('should return days and events for three months', async () => {
+      const mockDays = [
+        { day: 1, month: 12, year: 2025 },
+        { day: 15, month: 1, year: 2026 },
+        { day: 28, month: 2, year: 2026 },
+      ];
+      const mockEvents = [
+        { id: 1, show_name: 'Movie 1' },
+        { id: 2, show_name: 'Movie 2' },
+      ];
+
+      testEnv.mockD1.setBatchResults([
+        { results: mockDays, success: true },
+        { results: mockEvents, success: true },
+      ]);
+
+      const service = new CalendarService(testEnv.env, authService);
+      const result = await service.getThreeMonthsCalendar();
+
+      expect(result.days).toEqual(mockDays);
+      expect(result.events).toEqual(mockEvents);
+    });
+
+    it('should return empty arrays on database error', async () => {
+      testEnv.mockD1.setQueryResult('SELECT', () => {
+        throw new Error('Query timeout');
+      });
+
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const service = new CalendarService(testEnv.env, authService);
+      const result = await service.getThreeMonthsCalendar();
+
+      expect(result).toEqual({ days: [], events: [] });
+
+      consoleError.mockRestore();
+    });
   });
 
   describe('getCurrentMonthCalendar()', () => {
@@ -320,11 +497,12 @@ describe('CalendarService', () => {
       expect(result).toBe(true);
     });
 
-    it('should return false when data is fresh and exists', async () => {
+    it('should return false when data is fresh and all three months have data', async () => {
       testEnv.mockKV.setData('last_fetch', {
         time: Date.now() - 1000, // 1 second ago
       });
-      testEnv.mockD1.setQueryResult('SELECT COUNT', { count: 10 });
+      // Mock: all 3 months have data (month_count = 3)
+      testEnv.mockD1.setQueryResult('SELECT COUNT', { month_count: 3 });
 
       const service = new CalendarService(testEnv.env, authService);
       const result = await service.shouldUpdateCalendar();
@@ -332,11 +510,36 @@ describe('CalendarService', () => {
       expect(result).toBe(false);
     });
 
+    it('should return true when fetch is fresh but only 2 months have data', async () => {
+      testEnv.mockKV.setData('last_fetch', {
+        time: Date.now() - 1000,
+      });
+      // Mock: only 2 out of 3 months have data
+      testEnv.mockD1.setQueryResult('SELECT COUNT', { month_count: 2 });
+
+      const service = new CalendarService(testEnv.env, authService);
+      const result = await service.shouldUpdateCalendar();
+
+      expect(result).toBe(true);
+    });
+
+    it('should return true when fetch is fresh but only 1 month has data', async () => {
+      testEnv.mockKV.setData('last_fetch', {
+        time: Date.now() - 1000,
+      });
+      testEnv.mockD1.setQueryResult('SELECT COUNT', { month_count: 1 });
+
+      const service = new CalendarService(testEnv.env, authService);
+      const result = await service.shouldUpdateCalendar();
+
+      expect(result).toBe(true);
+    });
+
     it('should return true when fetch is fresh but no data exists', async () => {
       testEnv.mockKV.setData('last_fetch', {
         time: Date.now() - 1000,
       });
-      testEnv.mockD1.setQueryResult('SELECT COUNT', { count: 0 });
+      testEnv.mockD1.setQueryResult('SELECT COUNT', { month_count: 0 });
 
       const service = new CalendarService(testEnv.env, authService);
       const result = await service.shouldUpdateCalendar();
@@ -361,6 +564,23 @@ describe('CalendarService', () => {
       const result = await service.shouldUpdateCalendar();
 
       expect(result).toBe(true);
+    });
+
+    it('should use single query to check all three months', async () => {
+      testEnv.mockKV.setData('last_fetch', {
+        time: Date.now() - 1000,
+      });
+      testEnv.mockD1.setQueryResult('SELECT COUNT', { month_count: 3 });
+
+      const service = new CalendarService(testEnv.env, authService);
+      await service.shouldUpdateCalendar();
+
+      // Verify only one DB query was made (not three separate queries)
+      const queries = testEnv.mockD1.getExecutedQueries();
+      const countQueries = queries.filter(q => q.sql.includes('COUNT'));
+      expect(countQueries).toHaveLength(1);
+      // Verify the query checks all three months
+      expect(countQueries[0].sql).toContain('DISTINCT');
     });
   });
 

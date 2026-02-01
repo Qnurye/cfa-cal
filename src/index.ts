@@ -51,7 +51,7 @@ app.get('/', (c) => {
   });
 });
 
-/** Get current month calendar data (JSON) */
+/** Get three months calendar data (JSON) - previous, current, and next month */
 app.get('/api/calendar', async (c) => {
   const env = c.env;
   const authService = new AuthService(env);
@@ -61,49 +61,35 @@ app.get('/api/calendar', async (c) => {
   const shouldUpdate = await calendarService.shouldUpdateCalendar();
 
   if (shouldUpdate) {
-    const now = new Date();
-    const year = now.getFullYear().toString();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-
-    const calendarData = await calendarService.fetchMonthCalendar(year, month);
-
-    if (calendarData) {
-      const stored = await calendarService.storeCalendarData(calendarData);
-      if (stored) {
-        await calendarService.updateLastFetchTime();
-      }
+    const refreshResult = await calendarService.refreshThreeMonthsCalendar();
+    if (refreshResult.success) {
+      await calendarService.updateLastFetchTime();
     }
   }
 
-  const calendarData = await calendarService.getCurrentMonthCalendar();
+  const calendarData = await calendarService.getThreeMonthsCalendar();
   return json(c, calendarData, { cache: CACHE.MEDIUM });
 });
 
-/** Force refresh calendar data */
+/** Force refresh calendar data for three months */
 app.get('/api/calendar/refresh', async (c) => {
   const env = c.env;
   const authService = new AuthService(env);
   const calendarService = new CalendarService(env, authService);
 
-  const now = new Date();
-  const year = now.getFullYear().toString();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const refreshResult = await calendarService.refreshThreeMonthsCalendar();
 
-  const calendarData = await calendarService.fetchMonthCalendar(year, month);
-
-  if (!calendarData) {
-    return error(c, 'Failed to fetch calendar data from upstream API');
-  }
-
-  const stored = await calendarService.storeCalendarData(calendarData);
-
-  if (!stored) {
-    return error(c, 'Failed to store calendar data');
+  if (!refreshResult.success) {
+    return error(c, 'Failed to refresh calendar data from upstream API');
   }
 
   await calendarService.updateLastFetchTime();
 
-  return success(c, { refreshed: true }, 'Calendar data refreshed successfully');
+  return success(c, {
+    refreshed: true,
+    monthsRefreshed: refreshResult.monthsRefreshed,
+    monthsFailed: refreshResult.monthsFailed,
+  }, `Calendar data refreshed successfully (${refreshResult.monthsRefreshed} months)`);
 });
 
 /** ICS calendar export - supports filtering by city/cinema/hall */
@@ -119,12 +105,21 @@ app.get('/*', async (c) => {
   const authService = new AuthService(env);
   const calendarService = new CalendarService(env, authService);
 
+  // Check if we need to refresh data (same logic as /api/calendar)
+  const shouldUpdate = await calendarService.shouldUpdateCalendar();
+  if (shouldUpdate) {
+    const refreshResult = await calendarService.refreshThreeMonthsCalendar();
+    if (refreshResult.success) {
+      await calendarService.updateLastFetchTime();
+    }
+  }
+
   // Parse location codes from path
   const { cityCode, cinemaCode, hallCode } = parseIcsPath(pathname);
   const title = buildCalendarTitle(cityCode, cinemaCode, hallCode);
 
-  // Get calendar data
-  const calendarData = await calendarService.getCurrentMonthCalendar();
+  // Get calendar data (three months)
+  const calendarData = await calendarService.getThreeMonthsCalendar();
   const events = calendarData.events || [];
 
   // Filter by location
@@ -145,32 +140,21 @@ app.get('/*', async (c) => {
 // ============================================================================
 
 async function handleScheduled(env: Env): Promise<void> {
-  console.log('[Scheduled] Running calendar refresh');
+  console.log('[Scheduled] Running calendar refresh for three months');
 
   const authService = new AuthService(env);
   const calendarService = new CalendarService(env, authService);
 
-  const now = new Date();
-  const year = now.getFullYear().toString();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-
   try {
-    const calendarData = await calendarService.fetchMonthCalendar(year, month);
+    const refreshResult = await calendarService.refreshThreeMonthsCalendar();
 
-    if (!calendarData) {
-      console.error('[Scheduled] Failed to fetch calendar data');
-      return;
-    }
-
-    const stored = await calendarService.storeCalendarData(calendarData);
-
-    if (!stored) {
-      console.error('[Scheduled] Failed to store calendar data');
+    if (!refreshResult.success) {
+      console.error('[Scheduled] Failed to refresh any calendar data');
       return;
     }
 
     await calendarService.updateLastFetchTime();
-    console.log(`[Scheduled] Successfully refreshed calendar for ${year}-${month}`);
+    console.log(`[Scheduled] Successfully refreshed ${refreshResult.monthsRefreshed} months (${refreshResult.monthsFailed} failed)`);
   } catch (err) {
     console.error('[Scheduled] Error:', err);
   }
