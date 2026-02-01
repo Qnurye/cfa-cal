@@ -7,6 +7,7 @@
   "name": "cfa-cal",
   "main": "src/index.ts",
   "compatibility_date": "2025-07-05",
+  "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true
   },
