@@ -12,6 +12,40 @@ import { AuthError, DatabaseError } from './utils/errors';
 /** Cache duration for calendar data (12 hours in ms) */
 const CACHE_DURATION_MS = 12 * 60 * 60 * 1000;
 
+/** Represents a year-month tuple */
+interface YearMonth {
+  year: number;
+  month: number;
+}
+
+/**
+ * Get three consecutive months: previous, current, and next
+ * Handles year boundaries correctly (e.g., January -> December of previous year)
+ */
+export function getThreeMonthRange(referenceDate: Date = new Date()): {
+  previous: YearMonth;
+  current: YearMonth;
+  next: YearMonth;
+} {
+  const year = referenceDate.getFullYear();
+  const month = referenceDate.getMonth() + 1; // 1-indexed
+
+  // Previous month
+  const previous: YearMonth = month === 1
+    ? { year: year - 1, month: 12 }
+    : { year, month: month - 1 };
+
+  // Current month
+  const current: YearMonth = { year, month };
+
+  // Next month
+  const next: YearMonth = month === 12
+    ? { year: year + 1, month: 1 }
+    : { year, month: month + 1 };
+
+  return { previous, current, next };
+}
+
 /**
  * Authentication service for managing API tokens
  */
@@ -109,9 +143,16 @@ export class CalendarService {
 
   /**
    * Store calendar data using batched D1 operations for performance
+   * @param calendarData - The calendar response from API
+   * @param targetYear - The year for the data (defaults to current year)
+   * @param targetMonth - The month for the data (defaults to current month)
    * @throws {DatabaseError} When database operations fail
    */
-  async storeCalendarData(calendarData: CalendarResponse): Promise<boolean> {
+  async storeCalendarData(
+    calendarData: CalendarResponse,
+    targetYear?: number,
+    targetMonth?: number
+  ): Promise<boolean> {
     if (!calendarData.data?.list?.length) {
       return false;
     }
@@ -119,8 +160,8 @@ export class CalendarService {
     const { list } = calendarData.data;
     const timestamp = new Date().toISOString();
     const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
+    const year = targetYear ?? now.getFullYear();
+    const month = targetMonth ?? (now.getMonth() + 1);
 
     try {
       const db = this.env.DB;
@@ -173,7 +214,68 @@ export class CalendarService {
   }
 
   /**
+   * Fetch multiple months of calendar data in parallel
+   * Note: fetchMonthCalendar() internally catches all errors and returns null on failure,
+   * so Promise.all() is safe here - promises never reject.
+   */
+  async fetchMultipleMonths(months: { year: number; month: number }[]): Promise<{
+    results: { year: number; month: number; data: CalendarResponse | null; success: boolean }[];
+    successCount: number;
+    failureCount: number;
+  }> {
+    const results = await Promise.all(
+      months.map(async ({ year, month }) => {
+        const yearStr = year.toString();
+        const monthStr = String(month).padStart(2, '0');
+        const data = await this.fetchMonthCalendar(yearStr, monthStr);
+        return { year, month, data, success: data !== null };
+      })
+    );
+
+    return {
+      results,
+      successCount: results.filter(r => r.success).length,
+      failureCount: results.filter(r => !r.success).length,
+    };
+  }
+
+  /**
+   * Refresh calendar data for three months (previous, current, next)
+   * Partial failures are tolerated - successful months are still stored
+   */
+  async refreshThreeMonthsCalendar(): Promise<{
+    success: boolean;
+    monthsRefreshed: number;
+    monthsFailed: number;
+  }> {
+    const range = getThreeMonthRange();
+    const months = [range.previous, range.current, range.next];
+
+    const fetchResult = await this.fetchMultipleMonths(months);
+
+    // Store sequentially to avoid D1 concurrent write issues.
+    // Each storeCalendarData() executes a batch of statements that may conflict
+    // if run in parallel (e.g., DELETE + INSERT on same dates).
+    let storedCount = 0;
+    for (const result of fetchResult.results) {
+      if (result.success && result.data) {
+        const stored = await this.storeCalendarData(result.data, result.year, result.month);
+        if (stored) {
+          storedCount++;
+        }
+      }
+    }
+
+    return {
+      success: storedCount > 0,
+      monthsRefreshed: storedCount,
+      monthsFailed: fetchResult.failureCount + (fetchResult.successCount - storedCount),
+    };
+  }
+
+  /**
    * Get current month's calendar data from D1
+   * @deprecated Use getThreeMonthsCalendar() instead for better coverage
    */
   async getCurrentMonthCalendar(): Promise<{ days: CalendarDay[]; events: CalendarEvent[] }> {
     const now = new Date();
@@ -197,7 +299,34 @@ export class CalendarService {
   }
 
   /**
-   * Check if calendar data needs refresh (stale after 12 hours)
+   * Get three months of calendar data from D1 (previous, current, next month)
+   */
+  async getThreeMonthsCalendar(): Promise<{ days: CalendarDay[]; events: CalendarEvent[] }> {
+    const range = getThreeMonthRange();
+    const months = [range.previous, range.current, range.next];
+
+    try {
+      // Build WHERE clause for three months
+      const monthConditions = months.map(() => '(year = ? AND month = ?)').join(' OR ');
+      const bindings = months.flatMap(m => [m.year, m.month]);
+
+      const [daysResult, eventsResult] = await this.env.DB.batch([
+        this.env.DB.prepare(`SELECT * FROM calendar_days WHERE ${monthConditions} ORDER BY year ASC, month ASC, day ASC`).bind(...bindings),
+        this.env.DB.prepare(`SELECT * FROM calendar_events WHERE ${monthConditions} ORDER BY screen_start_time ASC`).bind(...bindings),
+      ]);
+
+      return {
+        days: (daysResult.results as unknown as CalendarDay[]) || [],
+        events: (eventsResult.results as unknown as CalendarEvent[]) || [],
+      };
+    } catch (error) {
+      console.error('[CalendarService] Query failed:', error);
+      return { days: [], events: [] };
+    }
+  }
+
+  /**
+   * Check if calendar data needs refresh (stale after 12 hours or missing any of three months)
    */
   async shouldUpdateCalendar(): Promise<boolean> {
     try {
@@ -209,13 +338,20 @@ export class CalendarService {
         return true;
       }
 
-      // Also check if we have data for current month
-      const currentDate = new Date();
-      const result = await this.env.DB.prepare(
-        'SELECT COUNT(*) as count FROM calendar_days WHERE year = ? AND month = ?'
-      ).bind(currentDate.getFullYear(), currentDate.getMonth() + 1).first<{ count: number }>();
+      // Check if we have data for all three months in a single query
+      const range = getThreeMonthRange();
+      const months = [range.previous, range.current, range.next];
+      const bindings = months.flatMap(m => [m.year, m.month]);
 
-      return !result || result.count === 0;
+      // Count distinct year-month combinations that have data
+      const result = await this.env.DB.prepare(`
+        SELECT COUNT(DISTINCT year || '-' || month) as month_count
+        FROM calendar_days
+        WHERE (year = ? AND month = ?) OR (year = ? AND month = ?) OR (year = ? AND month = ?)
+      `).bind(...bindings).first<{ month_count: number }>();
+
+      // Need all 3 months to have data
+      return !result || result.month_count < 3;
     } catch {
       return true; // Default to updating on error
     }
