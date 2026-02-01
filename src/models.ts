@@ -39,6 +39,11 @@ export interface CalendarEvent {
   tags: string[];               // any tags
   cover_img1: string;           // poster/cover image URL
 
+  // TMDb integration fields
+  tmdb_id: number | null;       // TMDb movie ID
+  imdb_id: string | null;       // IMDb ID (e.g., tt1234567)
+  tmdb_lookup_status: 'pending' | 'found' | 'not_found' | 'error';
+
   // Additional fields for our database
   date: string;                 // YYYY-MM-DD format
   day: number;                  // Day of month

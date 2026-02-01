@@ -183,6 +183,9 @@ export const sampleEvents: CalendarEvent[] = [
     year: 2026,
     created_at: '2026-01-10T10:00:00Z',
     updated_at: '2026-01-10T10:00:00Z',
+    tmdb_id: 993846,
+    imdb_id: 'tt0Mo6332',
+    tmdb_lookup_status: 'found',
   },
   {
     id: 12346,
@@ -213,6 +216,9 @@ export const sampleEvents: CalendarEvent[] = [
     year: 2026,
     created_at: '2026-01-10T10:00:00Z',
     updated_at: '2026-01-10T10:00:00Z',
+    tmdb_id: null,
+    imdb_id: null,
+    tmdb_lookup_status: 'not_found',
   },
   {
     id: 12347,
@@ -243,6 +249,9 @@ export const sampleEvents: CalendarEvent[] = [
     year: 2026,
     created_at: '2026-01-10T10:00:00Z',
     updated_at: '2026-01-10T10:00:00Z',
+    tmdb_id: null,
+    imdb_id: null,
+    tmdb_lookup_status: 'pending',
   },
   {
     id: 12348,
@@ -273,6 +282,9 @@ export const sampleEvents: CalendarEvent[] = [
     year: 2026,
     created_at: '2026-01-10T10:00:00Z',
     updated_at: '2026-01-10T10:00:00Z',
+    tmdb_id: null,
+    imdb_id: null,
+    tmdb_lookup_status: 'pending',
   },
 ];
 

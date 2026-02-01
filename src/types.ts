@@ -14,6 +14,8 @@ export interface Env {
   // Environment variables for API access
   API_ACCOUNT: string;
   API_PASSWORD: string;
+  // TMDb API key (optional - if not set, TMDb enrichment is skipped)
+  TMDB_API_KEY?: string;
 }
 
 /**
@@ -35,5 +37,6 @@ declare global {
     DB: D1Database;
     API_ACCOUNT: string;
     API_PASSWORD: string;
+    TMDB_API_KEY?: string;
   }
 }

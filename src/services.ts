@@ -6,6 +6,7 @@
 
 import { fetchCalendar, isCalendarResponseValid, isLoginSuccessful, login } from './api-client';
 import type { CalendarDay, CalendarEvent, CalendarResponse, KVStorage } from './models';
+import { findMovieWithImdbId, TMDbRateLimitError } from './tmdb-client';
 import type { Env } from './types';
 import { AuthError, DatabaseError } from './utils/errors';
 
@@ -242,11 +243,13 @@ export class CalendarService {
   /**
    * Refresh calendar data for three months (previous, current, next)
    * Partial failures are tolerated - successful months are still stored
+   * Also enriches events with TMDb data if API key is configured
    */
   async refreshThreeMonthsCalendar(): Promise<{
     success: boolean;
     monthsRefreshed: number;
     monthsFailed: number;
+    tmdbEnriched: number;
   }> {
     const range = getThreeMonthRange();
     const months = [range.previous, range.current, range.next];
@@ -266,10 +269,14 @@ export class CalendarService {
       }
     }
 
+    // Enrich events with TMDb data after storing
+    const tmdbEnriched = await this.enrichPendingEventsWithTMDb();
+
     return {
       success: storedCount > 0,
       monthsRefreshed: storedCount,
       monthsFailed: fetchResult.failureCount + (fetchResult.successCount - storedCount),
+      tmdbEnriched,
     };
   }
 
@@ -402,8 +409,8 @@ export class CalendarService {
         show_time, show_price, screen_up_time, screen_sales_time,
         screen_start_time, program_colle, screen_cinema, activity,
         have_activity, tags, cover_img1, date, day, month, year,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        created_at, updated_at, tmdb_id, imdb_id, tmdb_lookup_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       event.id,
       event.show_name,
@@ -432,7 +439,10 @@ export class CalendarService {
       eventDate.month,
       eventDate.year,
       timestamp,
-      timestamp
+      timestamp,
+      null, // tmdb_id - will be enriched later
+      null, // imdb_id - will be enriched later
+      'pending' // tmdb_lookup_status
     );
   }
 
@@ -444,6 +454,90 @@ export class CalendarService {
       `).bind('error', year, month, `Error: ${error}`, new Date().toISOString()).run();
     } catch {
       // Ignore logging errors
+    }
+  }
+
+  /**
+   * Enrich pending events with TMDb data (movie IDs)
+   * Processes up to maxEvents events per call to avoid rate limits
+   * @returns Number of events enriched
+   */
+  async enrichPendingEventsWithTMDb(maxEvents: number = 20): Promise<number> {
+    const apiKey = this.env.TMDB_API_KEY;
+
+    // Skip if no API key configured
+    if (!apiKey) {
+      console.log('[CalendarService] TMDb API key not configured, skipping enrichment');
+      return 0;
+    }
+
+    try {
+      // Get unique show names with pending lookup status
+      // Group by show_name to avoid duplicate API calls for the same movie
+      const pendingEvents = await this.env.DB.prepare(`
+        SELECT DISTINCT show_name, film_year
+        FROM calendar_events
+        WHERE tmdb_lookup_status = 'pending'
+        LIMIT ?
+      `).bind(maxEvents).all<{ show_name: string; film_year: string | null }>();
+
+      if (!pendingEvents.results?.length) {
+        return 0;
+      }
+
+      let enrichedCount = 0;
+
+      for (const event of pendingEvents.results) {
+        try {
+          const movieInfo = await findMovieWithImdbId(apiKey, event.show_name, event.film_year);
+
+          if (movieInfo) {
+            // Update all events with this show_name
+            await this.env.DB.prepare(`
+              UPDATE calendar_events
+              SET tmdb_id = ?, imdb_id = ?, tmdb_lookup_status = 'found', updated_at = ?
+              WHERE show_name = ? AND tmdb_lookup_status = 'pending'
+            `).bind(
+              movieInfo.tmdb_id,
+              movieInfo.imdb_id,
+              new Date().toISOString(),
+              event.show_name
+            ).run();
+
+            enrichedCount++;
+            console.log(`[CalendarService] Enriched "${event.show_name}" with TMDb ID: ${movieInfo.tmdb_id}`);
+          } else {
+            // Mark as not found
+            await this.env.DB.prepare(`
+              UPDATE calendar_events
+              SET tmdb_lookup_status = 'not_found', updated_at = ?
+              WHERE show_name = ? AND tmdb_lookup_status = 'pending'
+            `).bind(new Date().toISOString(), event.show_name).run();
+
+            console.log(`[CalendarService] No TMDb match for "${event.show_name}"`);
+          }
+        } catch (error) {
+          if (error instanceof TMDbRateLimitError) {
+            // Stop processing on rate limit, will continue next sync cycle
+            console.warn('[CalendarService] TMDb rate limit hit, stopping enrichment');
+            break;
+          }
+
+          // Mark as error for this specific movie
+          await this.env.DB.prepare(`
+            UPDATE calendar_events
+            SET tmdb_lookup_status = 'error', updated_at = ?
+            WHERE show_name = ? AND tmdb_lookup_status = 'pending'
+          `).bind(new Date().toISOString(), event.show_name).run();
+
+          console.error(`[CalendarService] TMDb error for "${event.show_name}":`, error);
+        }
+      }
+
+      return enrichedCount;
+    } catch (error) {
+      console.error('[CalendarService] TMDb enrichment failed:', error);
+      return 0;
     }
   }
 }
