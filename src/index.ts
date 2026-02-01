@@ -47,6 +47,7 @@ app.get('/', (c) => {
       calendar: '/api/calendar',
       refresh: '/api/calendar/refresh',
       ics: '/{city?}/{cinema?}/{hall?}/calendar.ics',
+      mcp: '/mcp',
     },
   });
 });
@@ -90,6 +91,19 @@ app.get('/api/calendar/refresh', async (c) => {
     monthsRefreshed: refreshResult.monthsRefreshed,
     monthsFailed: refreshResult.monthsFailed,
   }, `Calendar data refreshed successfully (${refreshResult.monthsRefreshed} months)`);
+});
+
+/** MCP endpoint - Model Context Protocol for AI agents */
+app.all('/mcp', async (c) => {
+  // Dynamic import to avoid bundling MCP SDK in all routes
+  const { handleMcpRequest } = await import('./mcp');
+  return handleMcpRequest(c.req.raw, c.env, c.executionCtx);
+});
+
+app.all('/mcp/*', async (c) => {
+  // Dynamic import to avoid bundling MCP SDK in all routes
+  const { handleMcpRequest } = await import('./mcp');
+  return handleMcpRequest(c.req.raw, c.env, c.executionCtx);
 });
 
 /** ICS calendar export - supports filtering by city/cinema/hall */

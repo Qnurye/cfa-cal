@@ -6,6 +6,7 @@ export default defineWorkersConfig({
       workers: {
         wrangler: { configPath: './wrangler.jsonc' },
         miniflare: {
+          compatibilityFlags: ['nodejs_compat'],
           bindings: {
             API_ACCOUNT: 'test_account',
             API_PASSWORD: 'test_password',
@@ -17,7 +18,7 @@ export default defineWorkersConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      exclude: ['src/types.ts', 'src/models.ts'],
+      exclude: ['src/types.ts', 'src/models.ts', 'src/mcp/**/*.ts'],
       reporter: ['text', 'html'],
     },
   },
