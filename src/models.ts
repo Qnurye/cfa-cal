@@ -141,3 +141,32 @@ export interface Hall {
   hall_code: string;
   keywords: string[];
 }
+
+// Pagination types for API responses
+export interface PaginationMeta {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  meta: PaginationMeta;
+}
+
+// Filter options for event queries
+export interface EventFilters {
+  city?: string;
+  cinema?: string;
+  hall?: string;
+  date?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
+export interface EventSearchParams extends EventFilters {
+  q?: string;
+  page?: number;
+  limit?: number;
+}

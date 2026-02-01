@@ -25,7 +25,7 @@ describe('HTTP Routes Integration', () => {
 
       expect(response.status).toBe(200);
       expect(body.name).toBe('CFA Calendar API');
-      expect(body.version).toBe('2.0.0');
+      expect(body.version).toBe('2.2.0');
     });
 
     it('should include endpoints in response', async () => {

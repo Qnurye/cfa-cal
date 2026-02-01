@@ -4,6 +4,7 @@
 // - Consistent response formatting
 
 import type { Context } from 'hono';
+import type { PaginationMeta } from '../models';
 
 /** Default CORS headers */
 const CORS_HEADERS = {
@@ -81,4 +82,16 @@ export function error(c: Context, message: string, status = 500): Response {
  */
 export function success<T>(c: Context, data: T, message?: string): Response {
   return json(c, { success: true, data, ...(message && { message }) });
+}
+
+/**
+ * Return paginated response with metadata
+ */
+export function paginated<T>(
+  c: Context,
+  data: T[],
+  meta: PaginationMeta,
+  options: JsonOptions = {}
+): Response {
+  return json(c, { data, meta }, { cache: CACHE.MEDIUM, ...options });
 }

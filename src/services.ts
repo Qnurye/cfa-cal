@@ -5,7 +5,7 @@
 // - Clean separation of concerns
 
 import { fetchCalendar, isCalendarResponseValid, isLoginSuccessful, login } from './api-client';
-import type { CalendarDay, CalendarEvent, CalendarResponse, KVStorage } from './models';
+import type { CalendarDay, CalendarEvent, CalendarResponse, EventFilters, KVStorage, PaginationMeta } from './models';
 import { findMovieWithImdbId, TMDbRateLimitError } from './tmdb-client';
 import type { Env } from './types';
 import { AuthError, DatabaseError } from './utils/errors';
@@ -369,6 +369,199 @@ export class CalendarService {
    */
   async updateLastFetchTime(): Promise<void> {
     await this.env.CFA_CAL_KV.put('last_fetch', JSON.stringify({ time: Date.now() }));
+  }
+
+  /**
+   * Get a single event by ID
+   */
+  async getEventById(id: number): Promise<CalendarEvent | null> {
+    try {
+      const result = await this.env.DB.prepare(
+        'SELECT * FROM calendar_events WHERE id = ?'
+      ).bind(id).first<CalendarEvent>();
+      return result || null;
+    } catch (error) {
+      console.error('[CalendarService] getEventById failed:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Search events with filters and pagination
+   */
+  async searchEvents(
+    filters: EventFilters,
+    query?: string,
+    page = 1,
+    limit = 20
+  ): Promise<{ events: CalendarEvent[]; meta: PaginationMeta }> {
+    const conditions: string[] = [];
+    const bindings: (string | number)[] = [];
+
+    // Build filter conditions
+    if (filters.date) {
+      conditions.push('date = ?');
+      bindings.push(filters.date);
+    }
+    if (filters.startDate) {
+      conditions.push('date >= ?');
+      bindings.push(filters.startDate);
+    }
+    if (filters.endDate) {
+      conditions.push('date <= ?');
+      bindings.push(filters.endDate);
+    }
+    if (filters.city) {
+      // City filtering uses screen_cinema keyword matching
+      conditions.push('screen_cinema LIKE ?');
+      bindings.push(`%${filters.city}%`);
+    }
+    if (filters.cinema) {
+      conditions.push('screen_cinema LIKE ?');
+      bindings.push(`%${filters.cinema}%`);
+    }
+    if (filters.hall) {
+      conditions.push('screen_cinema LIKE ?');
+      bindings.push(`%${filters.hall}%`);
+    }
+
+    // Search query matches show_name or activity
+    if (query) {
+      conditions.push('(show_name LIKE ? OR activity LIKE ?)');
+      bindings.push(`%${query}%`, `%${query}%`);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const offset = (page - 1) * limit;
+
+    try {
+      // Count total matching events
+      const countQuery = `SELECT COUNT(*) as total FROM calendar_events ${whereClause}`;
+      const countResult = await this.env.DB.prepare(countQuery).bind(...bindings).first<{ total: number }>();
+      const total = countResult?.total || 0;
+
+      // Fetch paginated results
+      const dataQuery = `SELECT * FROM calendar_events ${whereClause} ORDER BY screen_start_time ASC LIMIT ? OFFSET ?`;
+      const dataResult = await this.env.DB.prepare(dataQuery).bind(...bindings, limit, offset).all<CalendarEvent>();
+
+      return {
+        events: dataResult.results || [],
+        meta: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    } catch (error) {
+      console.error('[CalendarService] searchEvents failed:', error);
+      return {
+        events: [],
+        meta: { page, limit, total: 0, totalPages: 0 },
+      };
+    }
+  }
+
+  /**
+   * Get aggregate statistics for events
+   */
+  async getStats(): Promise<{
+    totalEvents: number;
+    eventsByCity: Record<string, number>;
+    eventsByDate: Record<string, number>;
+    dateRange: { start: string | null; end: string | null };
+  }> {
+    try {
+      const [totalResult, datesResult, rangeResult] = await this.env.DB.batch([
+        this.env.DB.prepare('SELECT COUNT(*) as total FROM calendar_events'),
+        this.env.DB.prepare('SELECT date, COUNT(*) as count FROM calendar_events GROUP BY date ORDER BY date'),
+        this.env.DB.prepare('SELECT MIN(date) as start, MAX(date) as end FROM calendar_events'),
+      ]);
+
+      const total = (totalResult.results?.[0] as { total: number } | undefined)?.total || 0;
+      const datesData = (datesResult.results || []) as { date: string; count: number }[];
+      const range = rangeResult.results?.[0] as { start: string | null; end: string | null } | undefined;
+
+      // Build eventsByDate map
+      const eventsByDate: Record<string, number> = {};
+      for (const row of datesData) {
+        eventsByDate[row.date] = row.count;
+      }
+
+      // Build eventsByCity based on screen_cinema patterns
+      // This is a simplified approach - counts events by location keywords
+      const cityKeywords = ['小西天', '百子湾', '江南'];
+      const eventsByCity: Record<string, number> = {};
+
+      for (const keyword of cityKeywords) {
+        const result = await this.env.DB.prepare(
+          'SELECT COUNT(*) as count FROM calendar_events WHERE screen_cinema LIKE ?'
+        ).bind(`%${keyword}%`).first<{ count: number }>();
+        if (result && result.count > 0) {
+          eventsByCity[keyword] = result.count;
+        }
+      }
+
+      return {
+        totalEvents: total,
+        eventsByCity,
+        eventsByDate,
+        dateRange: {
+          start: range?.start || null,
+          end: range?.end || null,
+        },
+      };
+    } catch (error) {
+      console.error('[CalendarService] getStats failed:', error);
+      return {
+        totalEvents: 0,
+        eventsByCity: {},
+        eventsByDate: {},
+        dateRange: { start: null, end: null },
+      };
+    }
+  }
+
+  /**
+   * Get API status including cache/refresh info
+   */
+  async getStatus(): Promise<{
+    healthy: boolean;
+    lastFetch: string | null;
+    cacheAge: number | null;
+    monthsCovered: string[];
+  }> {
+    try {
+      const kvData = await this.env.CFA_CAL_KV.get<{ time?: number }>('last_fetch', 'json');
+      const now = Date.now();
+
+      const lastFetchTime = kvData?.time || null;
+      const cacheAge = lastFetchTime ? Math.floor((now - lastFetchTime) / 1000) : null;
+
+      // Get distinct months with data
+      const monthsResult = await this.env.DB.prepare(
+        'SELECT DISTINCT year, month FROM calendar_days ORDER BY year, month'
+      ).all<{ year: number; month: number }>();
+
+      const monthsCovered = (monthsResult.results || []).map(
+        (row) => `${row.year}-${String(row.month).padStart(2, '0')}`
+      );
+
+      return {
+        healthy: true,
+        lastFetch: lastFetchTime ? new Date(lastFetchTime).toISOString() : null,
+        cacheAge,
+        monthsCovered,
+      };
+    } catch (error) {
+      console.error('[CalendarService] getStatus failed:', error);
+      return {
+        healthy: false,
+        lastFetch: null,
+        cacheAge: null,
+        monthsCovered: [],
+      };
+    }
   }
 
   // Helper methods
