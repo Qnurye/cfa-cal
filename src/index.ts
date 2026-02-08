@@ -8,7 +8,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { buildCalendarTitle, filterEventsByLocation, generateIcs, parseIcsPath } from './calendar';
+import { buildCalendarTitle, filterEventsByLocation, generateIcs, parseIcsPath, parseLocation } from './calendar';
 import { CFA } from './config';
 import type { EventFilters } from './models';
 import { AuthService, CalendarService } from './services';
